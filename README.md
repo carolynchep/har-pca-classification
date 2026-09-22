@@ -23,8 +23,8 @@ The PCA model uses about 82% fewer dimensions and loses 3.3 percentage points of
 
 ## Files
 
-- [`analysis/har_pca_classification.Rmd`](analysis/har_pca_classification.Rmd): R Markdown analysis, plots, and model comparisons.
-- [`presentation/STAT_6348_Final_Project.pptx`](presentation/STAT_6348_Final_Project.pptx): original class presentation.
+- [`human_activity_recognition_pca.Rmd`](human_activity_recognition_pca.Rmd): R Markdown analysis, plots, and model comparisons.
+- [`STAT_6348_Final_Project.pptx`](presentation/Final_Project Presentation.pptx): original class presentation.
 
 ## Reproduce the analysis
 
