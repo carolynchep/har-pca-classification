@@ -4,6 +4,11 @@
 
 Can principal component analysis make human activity classification faster while preserving useful accuracy? We compared linear discriminant analysis (LDA) on all 561 sensor features with LDA on principal components from the [UCI Human Activity Recognition Using Smartphones dataset](https://archive.ics.uci.edu/dataset/240/human+activity+recognition+using+smartphones). The dataset contains six activities, 7,352 training observations, and 2,947 held-out test observations.
 
+## Summary
+This project investigates the effectiveness of Principal Component Analysis as a technique to reduce dimensionality for classifying human physical activities from high-dimensional smartphone sensor data. We used the UCI Human Activity Recognition (UCI-HAR) dataset, which comprises 7,352 training observations and 2,947 test observations across six activity classes. The dataset has 561 features describing the observations, and while they provide comprehensive coverage of the underlying motion signals, they could introduce challenges associated with high-dimensional data such as multicollinearity, high computational cost, and the risk of overfitting.
+The main objective of this project is to assess baseline classification performance using 561 features, apply PCA to reduce the feature space, and compare Linear Discriminant Analysis (LDA) and k-Nearest Neighbors (kNN) classifiers, computing results across both the full and PCA-reduced feature space. LDA reports accuracy, precision, recall, F1 score, and runtime, whereas kNN compares test accuracies and runtime for the strongest selection of hyperparameters.
+We demonstrate that retaining 102 principal components (18.18% of the original features) preserves at least 95% of the total variance and achieves competitive classification accuracy with a significant reduction in processing time. Our results show a trade-off between predictive performance and efficiency, and we discuss the practical implications of this trade-off for real-world activity recognition applications.
+
 ## Results at a glance
 
 | LDA model | Input dimensions | Held-out accuracy | Fit and predict time* |
@@ -24,7 +29,7 @@ The PCA model uses about 82% fewer dimensions and loses 3.3 percentage points of
 ## Files
 
 - [`human_activity_recognition_pca.Rmd`](human_activity_recognition_pca.Rmd): R Markdown analysis, plots, and model comparisons.
-- [`STAT_6348_Final_Project.pptx`](presentation/Final_Project Presentation.pptx): original class presentation.
+- [`STAT 6348 Final Project.pptx`](STAT 6348 Final Project.pptx): original class presentation.
 
 ## Reproduce the analysis
 
