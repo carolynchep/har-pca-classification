@@ -1,0 +1,780 @@
+---
+title: "High-Dimensional Classification with PCA"
+author: 'Carolyne Chepkemboi '
+output:
+  html_document:
+    df_print: paged
+---
+
+### Data Loading and Exploration
+
+Load required libraries for this notebook.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+# custom set select() (since MASS is loaded, overriding select())
+select <- dplyr::select
+library(FactoMineR)
+library(factoextra)
+library(class)
+library(caret)
+library(plotly)
+library(knitr)
+set.seed(6348)
+```
+
+Load the Human Activity Recognition Using Smartphones dataset [Human Activity Recognition Using Smartphones dataset](https://archive.ics.uci.edu/dataset/240/human+activity+recognition+using+smartphones) into memory.
+
+The inner UCI HAR Dataset folder, as downloaded from the UC Irvine repository and unzipped, should be placed in the same directory as this file.
+
+Alternative solution: unzip the data, drag the "UCI HAR Dataset" subfolder into documents, set wd as setwd("~/Documents"), and the code should compile.
+
+```{r}
+# Training data/labels
+X_train_raw <- read.table("C:/Users/carolynechep/Desktop/human+activity+recognition+using+smartphones/UCI HAR Dataset/UCI HAR Dataset/train/X_train.txt")
+y_train_raw <- read.table("C:/Users/carolynechep/Desktop/human+activity+recognition+using+smartphones/UCI HAR Dataset/UCI HAR Dataset/train/y_train.txt")
+
+# Test data/labels
+X_test_raw <- read.table("C:/Users/carolynechep/Desktop/human+activity+recognition+using+smartphones/UCI HAR Dataset/UCI HAR Dataset/test/X_test.txt")
+y_test_raw <- read.table("C:/Users/carolynechep/Desktop/human+activity+recognition+using+smartphones/UCI HAR Dataset/UCI HAR Dataset/test/y_test.txt")
+```
+
+```{r}
+dim(X_train_raw) %>% print
+dim(X_test_raw) %>% print
+
+features <- dim(X_train_raw)[2]
+train_len <- dim(X_train_raw)[1]
+test_len <- dim(X_test_raw)[1]
+
+X_train_raw[1:5,1:3] %>% print
+y_train_raw[1:30,] %>% print
+```
+
+Rename the columns of the features dataframes to the given description of the corresponding feature.
+
+```{r}
+feature_descs <- read.table("C:/Users/carolynechep/Desktop/human+activity+recognition+using+smartphones/UCI HAR Dataset/UCI HAR Dataset/features.txt")
+colnames(feature_descs) <- c("index", "desc")
+colnames(X_train_raw) <- feature_descs$desc
+colnames(X_test_raw) <- feature_descs$desc
+
+generic_colnames <- paste("V", sapply(1:features, toString), sep = "") 
+```
+
+```{r}
+X_train_raw[1:5,1:3] %>% print
+```
+
+Add a column to the labels dataframes with the corresponding activity name for ease of interpretability.
+
+```{r}
+classes <- read.table("C:/Users/carolynechep/Desktop/human+activity+recognition+using+smartphones/UCI HAR Dataset/UCI HAR Dataset/activity_labels.txt")
+
+y_train <- y_train_raw %>%
+  mutate(index = V1,
+    activity = classes$V2[index]) %>%
+  select(index, activity)
+
+y_test <- y_test_raw %>%
+  mutate(index = V1,
+    activity = classes$V2[index]) %>%
+  select(index, activity)
+```
+
+```{r}
+y_train %>% count(activity) %>% print
+```
+
+Scale and center the raw features. We can't use `scale()` since we need to scale the test data with respect to the means and standard deviations of the training data.
+
+```{r}
+# Calculate the mean and sd of each raw feature
+X_train_raw_mean <- colMeans(X_train_raw)
+X_train_raw_sd <- apply(X_train_raw, 2, sd)
+
+# Subtract the mean from each feature, then divide by the sd
+X_train <- X_train_raw %>% 
+  sweep(2, X_train_raw_mean, "-") %>%
+  sweep(2, X_train_raw_sd, "/")
+
+X_test <- X_test_raw %>% 
+  sweep(2, X_train_raw_mean, "-") %>%
+  sweep(2, X_train_raw_sd, "/")
+```
+
+```{r}
+X_train[1:5,1:3] %>% print
+```
+### Exploratory Data Analysis
+### Activity Class Distribution
+```{r}
+library(ggplot2)
+
+y_train %>%
+  count(activity) %>%
+  ggplot(aes(x = activity, y = n)) +
+  geom_bar(stat = "identity", fill = "#2C7FB8", width = 0.7) +
+  theme_minimal(base_size = 14) +
+  labs(title = "Class Distribution (Training Set)",
+       x = "Activity", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+### Feature Density Distributions
+```{r}
+library(tidyr)
+X_sample <- X_train_raw[, 1:6]
+
+X_long <- X_sample %>%
+  as.data.frame() %>%
+  pivot_longer(cols = everything())
+
+ggplot(X_long, aes(x = value)) +
+  geom_density(fill = "#2C7FB8", alpha = 0.6) +
+  facet_wrap(~name, scales = "free") +
+  theme_minimal() +
+  labs(title = "Feature Density Distributions")
+```
+### Correlation Heatmap
+```{r}
+library(corrplot)
+
+cor_mat <- cor(X_train_raw[, 1:10])  # subset for readability
+
+corrplot(cor_mat, method = "color", tl.cex = 0.5)
+```
+### Standardization
+Scale and center the raw features of training data using sweep()
+```{r}
+# Calculate the mean and sd of each raw feature
+X_train_raw_mean <- colMeans(X_train_raw)
+X_train_raw_sd <- apply(X_train_raw, 2, sd)
+
+# Subtract the mean from each feature, then divide by the sd
+X_train <- X_train_raw %>% 
+  sweep(2, X_train_raw_mean, "-") %>%
+  sweep(2, X_train_raw_sd, "/")
+
+X_test <- X_test_raw %>% 
+  sweep(2, X_train_raw_mean, "-") %>%
+  sweep(2, X_train_raw_sd, "/")
+```
+
+```{r}
+X_train[1:5,1:3] %>% print
+```
+
+### Additional EDA
+
+Check if the data has missing values to handle
+
+```{r}
+sum(is.na(X_train_raw))
+sum(is.na(X_test_raw))
+```
+
+Summary statistics and histogram of standard deviations to corroborate scaling
+
+```{r}
+standard_deviations <- apply(X_train_raw, 2, sd)
+summary(standard_deviations)
+IQR(standard_deviations)
+hist(standard_deviations,
+     main = "Standard Deviations Distributions",
+     xlab = "Standard Deviations of Features",
+     col = "#2f4569")
+```
+
+Number and percentage of absolute and raw correlations greater than 0.9.
+
+```{r}
+correlations <- cor(X_train_raw)[upper.tri(cor(X_train_raw))]
+sum(abs(correlations) > 0.9)
+sum(correlations > 0.9)
+sum(abs(correlations) > 0.9) / ((features * (features-1)) / 2)
+sum(correlations > 0.9) / ((features * (features-1)) / 2)
+```
+
+Percentage of absolute and raw correlations greater than 0.8.
+
+```{r}
+sum(abs(correlations) > 0.8) / ((features * (features-1)) / 2)
+sum(correlations > 0.8) / ((features * (features-1)) / 2)
+```
+
+Distribution of pairwise correlations.
+
+```{r}
+hist(correlations,
+     main = "Distribution of Unique Pairwise Correlations",
+     xlab = "Correlation",
+     col = "#2f4569")
+```
+
+### LDA Baseline Model
+```{r}
+library(MASS)
+library(caret)
+
+# Make sure activity labels are factors
+y_train$activity <- factor(y_train$activity)
+y_test$activity <- factor(y_test$activity, levels = levels(y_train$activity))
+
+# Start time to measure efficiency
+baseline_start <- Sys.time()
+
+# Train baseline LDA model
+baseline_model <- lda(x = X_train, grouping = y_train$activity)
+
+# Predict test labels
+baseline_pred <- predict(baseline_model, X_test)$class
+
+# End time
+baseline_end <- Sys.time()
+
+# Force predictions to have same factor levels as y_test
+baseline_pred <- factor(baseline_pred, levels = levels(y_test$activity))
+
+# Confusion matrix
+baseline_cm <- confusionMatrix(data = baseline_pred,
+                               reference = y_test$activity)
+
+# baseline training accuracy (to assess theoretical upper limit of test accuracy)
+baseline_train_pred <- predict(baseline_model, X_train)$class
+
+baseline_train_pred <- factor(baseline_train_pred,
+                              levels = levels(y_train$activity))
+
+baseline_train_cm <- confusionMatrix(data = baseline_train_pred,
+                                     reference = y_train$activity)
+
+baseline_train_cm$overall["Accuracy"]
+
+```
+### Visualization of the confusion matrix
+```{r}
+cm <- confusionMatrix(baseline_pred, y_test$activity)
+cm$table
+
+accuracy <- cm$overall["Accuracy"]
+print(accuracy)
+
+metrics <- cm$byClass[, c("Precision", "Recall", "F1")]
+metrics
+```
+```{r}
+
+cm_df <- as.data.frame(cm$table)
+colnames(cm_df) <- c("Predicted", "Actual", "Freq")
+
+library(ggplot2)
+
+ggplot(cm_df, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "black", size = 4) +
+  scale_fill_gradient(low = "#deebf7", high = "#08519c") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Confusion Matrix (Baseline Model)",
+    x = "Actual",
+    y = "Predicted"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Principal Component Analysis
+
+There are multiple ways to perform PCA in R; which one is the fastest?
+
+Calculate the sample covariance matrix of `X_train`, then find the 
+eigenvalues and corresponding eigenvectors and multiply `X_train` by the latter.
+
+```{r}
+scov.start <- Sys.time()
+X_train.scov <- t(X_train) %*% as.matrix(X_train) / (nrow(X_train)-1)
+X_train.scov.eigen <- X_train.scov %>% eigen
+X_train.scov.pcs <- as.matrix(X_train) %*% X_train.scov.eigen$vectors
+scov.end <- Sys.time()
+X_train.scov.eivals <- X_train.scov.eigen$values
+```
+
+```{r}
+(scov.end - scov.start) %>% print
+```
+
+Calculate the singular value decomposition $UDV^T$ of `X_train`, and derive the principal components $YV=UD$. 
+
+```{r}
+svd.start <- Sys.time()
+X_train.svd <- X_train %>% svd
+X_train.svd.pcs <- X_train.svd$u %*% diag(X_train.svd$d)
+X_train.svd.eivals <- X_train.svd$d^2 / (nrow(X_train)-1)
+svd.end <- Sys.time()
+```
+
+```{r}
+(svd.end - svd.start) %>% print
+```
+
+Use the `PCA()` function from `FactoMineR` (We will proceed using this,
+even though it is slower, because the results are more conducive to
+statistical analysis)
+```{r}
+pca.start <- Sys.time()
+X_train.pca <- PCA(X_train, ncp = nrow(X_train), graph = FALSE)
+pca.end <- Sys.time()
+X_train.pcs <- X_train.pca[["ind"]][["coord"]] %>% as.data.frame
+colnames(X_train.pcs) <- generic_colnames
+X_train.eivals <- X_train.pca$eig[,1]
+
+X_train.v <- X_train.pca$svd$V %>% as.data.frame 
+X_test.pcs <- (as.matrix(X_test) %*% as.matrix(X_train.v)) %>% as.data.frame 
+colnames(X_test.pcs) <- generic_colnames 
+```
+
+```{r}
+(pca.end - pca.start) %>% print
+```
+
+```{r}
+X_train.pcs[1:5,1:3] %>% print
+X_train.eivals[1:5] %>% print
+```
+
+Create a scatter plot of the first two principal components of the data...
+
+```{r}
+scatter2 <- plot_ly(x=X_train.pcs[,1], y=X_train.pcs[,2],
+        type="scatter", mode="markers", color=y_train$activity) %>%
+  layout(title = 'First Two Principal Components')
+
+scatter2
+```
+
+and of the first three principal components.
+
+```{r}
+scatter3 <- plot_ly(x=X_train.pcs[[1]], y=X_train.pcs[[2]],
+                    z=X_train.pcs[[3]],
+        type="scatter3d", mode="markers", color=y_train$activity)  %>%
+  layout(title = 'First Three Principal Components')
+
+scatter3
+```
+
+How many principal components should we use in building models? Generate
+a scree plot of cumulative variance.
+
+```{r}
+
+X_train.cum_var <- X_train.pca$eig[,3]
+
+scree <- ggplot() +
+  geom_line(aes(x=1:length(X_train.cum_var), y=X_train.cum_var)) +
+  geom_point(aes(x=1:length(X_train.cum_var), y=X_train.cum_var)) +
+  labs(title="Cumulative Variance Scree Plot", x="Principal Components", 
+       y="% Variance Explained")
+
+scree %>% plot
+```
+
+How many principal components do we need reach certain thresholds of variance?
+```{r}
+# 80%
+which(X_train.cum_var < 80) %>% length %>% +1 %>% print
+
+# 90%
+which(X_train.cum_var < 90) %>% length %>% +1 %>% print
+
+# 95%
+which(X_train.cum_var < 95) %>% length %>% +1 %>% print
+
+# 99%
+which(X_train.cum_var < 99) %>% length %>% +1 %>% print
+
+# 99.9%
+which(X_train.cum_var < 99.9) %>% length %>% +1 %>% print
+```
+
+What threshold of variance do certain numbers of principal compoments
+reach?
+
+```{r}
+# 1
+X_train.cum_var[1] %>% print
+
+# 5
+X_train.cum_var[5] %>% print
+
+# 10
+X_train.cum_var[10] %>% print
+
+# 20
+X_train.cum_var[20] %>% print
+
+# 50
+X_train.cum_var[50] %>% print
+
+# 100
+X_train.cum_var[100] %>% print
+
+# 200
+X_train.cum_var[200] %>% print
+```
+Which variables contribute most to the first principal component?
+```{r}
+X_train.pc1_cont <- X_train.v[,1] %>% sort(index.return=TRUE, decreasing=TRUE)
+
+t5_ind <- 1:5
+
+X_train.pc1_cont_t5 <- X_train.pc1_cont$ix[t5_ind]
+
+X_train.pc1_cont_t5 %>% print
+feature_descs$desc[X_train.pc1_cont_t5] %>% print
+X_train.v[X_train.pc1_cont_t5,1] %>% print
+```
+
+Which variables contribute least to the first principal component?
+```{r}
+b5_ind <- (features-4):features
+X_train.pc1_cont_b5 <- X_train.pc1_cont$ix[b5_ind]
+
+X_train.pc1_cont_b5 %>% print
+feature_descs$desc[X_train.pc1_cont_b5] %>% print
+X_train.pc1_cont$x[b5_ind] %>% print
+```
+
+Plot the coefficients of each variable in the first principle component
+in decreasing order.
+
+```{r}
+pc1_plot <- ggplot() +
+  geom_line(aes(x=1:length(X_train.pc1_cont$x), y=X_train.pc1_cont$x)) +
+  geom_point(aes(x=1:length(X_train.pc1_cont$x), y=X_train.pc1_cont$x)) +
+  labs(title="First Principal Component Coefficients", x="Rank", 
+       y="Coefficient")
+
+pc1_plot %>% plot
+```
+
+### PCA components for transformation
+
+We chose the first PCs explaining at least 95% of variance of the original features.
+
+```{r}
+pcs_95 <- which(X_train.cum_var >= 95)[1]
+pcs_95
+```
+
+Using these, subset the training and test sets using these first PCs (note: no leakage, only training set used to compute loadings).
+
+```{r}
+X_train.pcs_95 <- X_train.pcs[, 1:pcs_95]
+X_test.pcs_95 <- X_test.pcs[, 1:pcs_95]
+```
+
+### LDA on PCA transformed features
+
+After transforming the features using PCA, we fit another LDA model.
+
+We compare all metrics including precision, recall, f1, accuracy, and runtime against the original model.
+
+Note To Professor: The "nicer tables" included in the presentation will only load if you use library("gt"). The package will not install automatically when knitting, so the code will be left but commented out. The knitr tables should produce the same results as our presentation (minus runtime differences by hardware).
+
+```{r}
+# load needed libraries
+library(MASS)
+library(caret)
+
+# refactoring due to errors encountered
+activity_levels <- c("LAYING", "SITTING", "STANDING", "WALKING",
+                     "WALKING_DOWNSTAIRS", "WALKING_UPSTAIRS")
+y_train$activity <- factor(as.character(y_train$activity),
+                           levels = activity_levels)
+y_test$activity <- factor(as.character(y_test$activity),
+                           levels = activity_levels)
+
+# computational efficiency start
+eff_start <- Sys.time()
+
+# training the model on the transformed dataset on 102 components
+pca_lda <- lda(x = X_train.pcs_95, grouping = y_train$activity)
+
+# create predictions
+pca_lda_pred <- predict(pca_lda, X_test.pcs_95)$class
+
+# computational efficiency end
+eff_end <- Sys.time()
+
+# create predictions on transformed test set
+pca_lda_pred <- factor(as.character(pca_lda_pred),
+                       levels = activity_levels)
+
+# confusion matrix
+cm_pca_lda <- confusionMatrix(pca_lda_pred,
+                              reference = y_test$activity)
+cm_pca_lda
+
+# convert into a dataframe for viewing
+cm_pca_lda_df <- as.data.frame(cm_pca_lda$table)
+colnames(cm_pca_lda_df) <- c("Predicted", "Actual", "Freq")
+
+# visualize confusion matrix, setup from earlier copied exactly
+ggplot(cm_pca_lda_df, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "black", size = 4) +
+  scale_fill_gradient(low = "#deebf7", high = "#08519c") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Confusion Matrix (PCA Transformed Model)",
+    x = "Actual",
+    y = "Predicted"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# percent of original features
+print(pcs_95 / ncol(X_train_raw) * 100)
+
+# Find the metrics
+print(cm_pca_lda$overall["Accuracy"])
+print(cm_pca_lda$byClass[, c("Precision", "Recall", "F1")])
+
+# save for viewing
+accuracy2 <- cm_pca_lda$overall["Accuracy"]
+metrics2 <- cm_pca_lda$byClass[, c("Precision", "Recall", "F1")]
+
+# After PCA time
+time2 <- eff_end - eff_start
+print(time2)
+
+# before PCA time
+time1 <- baseline_end - baseline_start
+print(time1)
+
+# convert into a usable format for calculation
+time1 <- as.numeric(time1, unit = "secs")
+time2 <- as.numeric(time2, unit = "secs")
+
+# relative speedup
+print((time1-time2) / time1 * 100)
+
+
+# print accuracy before and after
+print(accuracy)
+print(accuracy2)
+
+# assemble before and after in a dataframe
+baseline_metrics <- data.frame(
+  Precision = round(metrics[, "Precision"], 3),
+  Recall = round(metrics[, "Recall"], 3),
+  F1 = round(metrics[, "F1"], 3),
+  Runtime = round(time1, 3)
+)
+
+after_metrics <- data.frame(
+  Precision = round(metrics2[, "Precision"], 3),
+  Recall = round(metrics2[, "Recall"], 3),
+  F1 = round(metrics2[, "F1"], 3),
+  Runtime = round(time2, 3)
+)
+
+# knitr
+library(knitr)
+
+# gt
+# library("gt")
+
+# print with knitr
+knitr::kable(baseline_metrics, caption = "LDA metrics before PCA")
+
+# nicer table
+baseline_metrics$Class <- rownames(baseline_metrics)
+baseline_metrics$Class <- gsub("Class: ", "", baseline_metrics$Class)
+baseline_metrics <- baseline_metrics[, c("Class", "Precision", "Recall", "F1", "Runtime")]
+
+#baseline_metrics %>%
+#  gt()
+
+knitr::kable(after_metrics, caption = "LDA metrics after PCA")
+
+# nicer table
+after_metrics$Class <- rownames(after_metrics)
+after_metrics$Class <- gsub("Class: ", "", after_metrics$Class)
+after_metrics <- after_metrics[, c("Class", "Precision", "Recall", "F1", "Runtime")]
+
+#after_metrics %>%
+#  gt()
+
+print(baseline_metrics)
+
+# F1 comparison
+round(metrics2[, "F1"] - metrics[, "F1"], 3)
+print(summary(round(metrics2[, "F1"] - metrics[, "F1"], 3)))
+
+# Model comparison dataframe
+model_comparison <- data.frame(
+  Metric = c("Features", "Accuracy", "Mean F1", "Runtime (sec)"),
+  Baseline = c(as.character(ncol(X_train_raw)),
+       round(as.numeric(accuracy), 3),
+       round(mean(metrics[, "F1"]), 3),
+       round(time1, 3)),
+  PCA = c(as.character(ncol(X_train.pcs_95)),
+       round(as.numeric(accuracy2), 3),
+       round(mean(metrics2[, "F1"]), 3),
+       round(time2, 3)),
+  Change = c(
+       paste0(round((ncol(X_train.pcs_95) - ncol(X_train_raw)) / ncol(X_train_raw) * 100, 3), "%"),
+       round(as.numeric(accuracy2) - as.numeric(accuracy), 3),
+       round(mean(metrics2[, "F1"]) - mean(metrics[, "F1"]), 3),
+       paste0(round((time2 - time1) / time1 * 100, 3), "%")
+  )
+)
+
+# print with knitr
+knitr::kable(model_comparison, caption = "Metric Comparison Table") 
+
+# nicer table
+#model_comparison %>%
+#  gt()
+
+```
+
+### k-Nearest Neighbors
+
+
+
+What combination of principal components and $k$ yields the best test
+accuracy? 
+
+```{r}
+
+knn_test_acc <- function(k, pcs) { 
+  test_preds <- knn(train=X_train.pcs[1:pcs], test=X_test.pcs[1:pcs],
+                    cl=y_train$index, k = k)
+  return (length(which(y_test$index == test_preds)) / test_len) 
+} 
+
+min_pcs <- 1
+max_pcs <- 301
+pc_interval = 30
+
+min_k <- 1
+max_k <- 401
+k_interval = 40
+
+coarse_knn_grid <- expand.grid(pcs=seq(min_pcs, max_pcs, pc_interval),
+                               k=seq(min_k, max_k, k_interval))
+
+for (row in rownames(coarse_knn_grid)) {
+  pcs <- coarse_knn_grid[row,]$pcs
+  k <- coarse_knn_grid[row,]$k
+  coarse_knn_grid[row, "test_acc"] <- knn_test_acc(k, pcs)
+}
+
+coarse_knn <- ggplot(coarse_knn_grid, aes(x = k, y = pcs, fill = test_acc)) +
+  geom_tile()  +
+  labs(title="Coarse Hyperparameter Grid Search (KNN)", x="k", 
+       y="Principal Components", fill="Test Accuracy") +
+  coord_cartesian(xlim = c(min_k, tail(coarse_knn_grid, 1)$k), 
+                  ylim = c(min_pcs, tail(coarse_knn_grid, 1)$pcs))
+
+coarse_knn %>% plot
+```
+
+```{r}
+coarse_knn_grid[which.max(coarse_knn_grid$test_acc),] %>% print
+```
+
+$k$ and the number of principal components seem to be independent in determining the test accuracy of the model. Thus, we can save time by simply tuning $k$ at some relatively low number of principal components.
+
+```{r}
+fine_k <- 1:100
+
+fine_k_acc <- sapply(fine_k, knn_test_acc, pcs=10)
+
+fine_k_knn <- ggplot() +
+  geom_line(aes(x=fine_k, fine_k_acc)) +
+  labs(title="Fine-Tuning k (10 PCs)", x="k", 
+       y="Test Accuracy")
+
+fine_k_knn %>% plot
+```
+
+```{r}
+which.max(fine_k_acc) %>% print
+fine_k_acc[which.max(fine_k_acc)] %>% print
+```
+
+Plot the test accuracy at different numbers of principal components for
+$k=20$.
+
+```{r}
+fine_pcs <- 1:300
+
+fine_pcs_acc <- sapply(fine_pcs, knn_test_acc, k=20)
+
+fine_pcs_knn <- ggplot() +
+  geom_line(aes(x=fine_pcs, fine_pcs_acc)) +
+  labs(title="Fine-Tuning Principal Components (k=20)", x="Principal Components", 
+       y="Test Accuracy")
+
+fine_pcs_knn %>% plot
+```
+
+```{r}
+which.max(fine_pcs_acc) %>% print
+fine_pcs_acc[which.max(fine_pcs_acc)] %>% print
+```
+
+How does this compare to performing KNN on the original dataset?
+
+```{r}
+full_knn.start <- Sys.time()
+full_knn_preds <- knn(train=X_train, test=X_test,
+                   cl=y_train$index, k = 20)
+full_knn.end <- Sys.time()
+length(which(y_test$index == full_knn_preds)) / test_len %>% print
+(full_knn.end - full_knn.start) %>% print
+```
+
+```{r}
+pca_knn.start <- Sys.time()
+pca_knn_preds <- knn(train=X_train.pcs[1:120], test=X_test.pcs[1:120],
+                   cl=y_train$activity, k = 20)
+pca_knn.end <- Sys.time()
+(pca_knn.end - pca_knn.start) %>% print
+```
+
+
+Create a confusion matrix and generate descriptive statistics.
+
+
+```{r}
+knn_cm <- confusionMatrix(pca_knn_preds, as.factor(y_test$activity))
+
+knn_cm_df <- as.data.frame(knn_cm$table)
+colnames(knn_cm_df) <- c("Predicted", "Actual", "Freq")
+
+knn_cm_plot <- ggplot(knn_cm_df, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "black", size = 4) +
+  scale_fill_gradient(low = "#deebf7", high = "#08519c") +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Confusion Matrix (KNN)",
+    x = "Actual",
+    y = "Predicted"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+knn_cm_plot %>% plot
+```
+
+```{r}
+knn_cm$overall[c("Accuracy")] %>% print
+
+knn_metrics <- knn_cm$byClass[, c("Precision", 
+                                  "Recall", "F1")]
+knn_metrics %>% print
+```
